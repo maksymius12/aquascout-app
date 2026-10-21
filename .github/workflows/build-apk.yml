@@ -32,12 +32,9 @@ jobs:
           name: AquaScout-apk
           path: AquaScout.apk
 
-      - name: Publish to "latest" release
+      - name: Publish to latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest AquaScout.apk \
-            --title "AquaScout — збірка #${{ github.run_number }}" \
-            --notes "Автоматична збірка. Завантаж AquaScout.apk на телефон і встанови." \
-            --latest'
+          gh release create latest AquaScout.apk --title "AquaScout build ${{ github.run_number }}" --notes "Download AquaScout.apk and install it on your phone." --latest
