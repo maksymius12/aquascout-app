@@ -137,11 +137,34 @@ fun ScanScreen(vm: AppViewModel) {
     val hasPerms = { btPermissions().all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED } }
     var granted by remember { mutableStateOf(hasPerms()) }
     var enabled by remember { mutableStateOf(vm.scanner.isEnabled) }
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted = hasPerms() }
-    val enableLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { enabled = vm.scanner.isEnabled }
+    var asked by remember { mutableStateOf(false) }   // чи вже показували системний запит
+
+    val enableLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        enabled = vm.scanner.isEnabled
+    }
+    fun askEnable() {
+        try { enableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) } catch (e: SecurityException) { granted = false }
+    }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        asked = true
+        granted = hasPerms()
+        enabled = vm.scanner.isEnabled
+        if (granted && !enabled) askEnable()
+    }
+    // Повернулися з налаштувань телефона — перевіряємо ще раз
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        granted = hasPerms()
+        enabled = vm.scanner.isEnabled
+    }
     val found by vm.scanner.found.collectAsState()
     val scanning by vm.scanner.scanning.collectAsState()
 
+    // Одразу при відкритті екрана: просимо дозвіл, потім вмикаємо Bluetooth
+    LaunchedEffect(Unit) {
+        if (vm.scanner.adapter == null) return@LaunchedEffect
+        if (!granted) permLauncher.launch(btPermissions())
+        else if (!enabled) askEnable()
+    }
     LaunchedEffect(granted, enabled) { if (granted && enabled) vm.scanner.start() }
     DisposableEffect(Unit) { onDispose { vm.scanner.stop() } }
 
@@ -149,14 +172,21 @@ fun ScanScreen(vm: AppViewModel) {
         when {
             vm.scanner.adapter == null -> WarnBox("На цьому телефоні немає Bluetooth.")
             !granted -> {
-                Text("Щоб знайти робота, застосунку потрібен доступ до Bluetooth.", color = Ink)
+                Text("Щоб знайти робота, застосунку потрібен дозвіл «Пристрої поблизу» (Bluetooth).", color = Ink)
                 PrimaryButton("Дозволити") { permLauncher.launch(btPermissions()) }
+                if (asked) {
+                    Note("Якщо вікно з дозволом не з'являється, телефон запам'ятав відмову. Відкрий налаштування → Дозволи → «Пристрої поблизу» → Дозволити.")
+                    GhostButton("Відкрити налаштування застосунку") {
+                        settingsLauncher.launch(
+                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.fromParts("package", ctx.packageName, null))
+                        )
+                    }
+                }
             }
             !enabled -> {
                 Text("Bluetooth вимкнено.", color = Ink)
-                PrimaryButton("Увімкнути Bluetooth") {
-                    try { enableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) } catch (e: SecurityException) { granted = false }
-                }
+                PrimaryButton("Увімкнути Bluetooth") { askEnable() }
             }
             else -> {
                 val bonded = remember(granted, enabled) { vm.scanner.bonded() }
